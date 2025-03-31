@@ -9,6 +9,7 @@ from transformers import (
 from sentence_transformers import SentenceTransformer, losses
 from peft import LoraConfig, get_peft_model
 from datasets import load_dataset
+import argparse
 
 
 def prepare_dataset(dataset_name, tokenizer, batch_size, max_length, seed = 42, group = None):
@@ -125,35 +126,25 @@ def train(args, train_dataset, val_dataset):
     print(f"✅ Model saved to {args.output_dir}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--lr', type=float, default=2e-4)
-    parser.add_argument('--warmup_ratio', type=float, default=0.06)
-    parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--step_batch_size', type=int, default=None)
-    parser.add_argument('--epoch', type=int, default=20)
-    parser.add_argument('--max_length', type=int, default=512)
+    # Argument Parser
+    parser = argparse.ArgumentParser(description="Train a SentenceTransformer model with full fine-tuning or LoRA.")
+    
+    # Training parameters
+    parser.add_argument('--lr', type=float, default=2e-4, help="Learning rate")
+    parser.add_argument('--warmup_ratio', type=float, default=0.06, help="Warmup ratio for LR scheduler")
+    parser.add_argument('--batch_size', type=int, default=32, help="Batch size per device")
+    parser.add_argument('--epochs', type=int, default=5, help="Number of training epochs")
+    parser.add_argument('--weight_decay', type=float, default=0.01, help="Weight decay for Adam optimizer")
 
-    parser.add_argument('--weight_decay', type=float, default=0) 
-    parser.add_argument('--dataset_name', type=str, default='cola')
-    parser.add_argument('--model_name_or_path', type=str, default='roberta-base')
-    parser.add_argument('--tokenizer_name_or_path', type=str, default='roberta-base')
-    parser.add_argument('--random_seed', type=int, default=42)
+    # Model and dataset parameters
+    parser.add_argument('--model_name_or_path', type=str, default="sentence-transformers/all-MiniLM-L6-v2",
+                        help="Model checkpoint")
+    parser.add_argument('--dataset_name', type=str, default="glue", help="Dataset to use")
+    parser.add_argument('--output_dir', type=str, default="./output", help="Directory to save the model")
+    parser.add_argument('--method', type=str, choices=["full", "lora"], default="full",
+                        help="Training method: 'full' for full fine-tuning, 'lora' for parameter-efficient fine-tuning")
 
-    parser.add_argument('--method', type=str, choices=['full', 'lora', 'prefix-tuning', 'p-tuning', 'prompt-tuning', 'prompt-routing']) 
-    parser.add_argument('--num_virtual_tokens', type=int, default=None)
-
-    parser.add_argument('--num_virtual_tokens_full', type=int, default=None)
-    parser.add_argument('--routing_level', type=str, default='prompt')
-
-    # mixture of prompts configs
-    parser.add_argument('--consistency_alpha', type=float, default=0.1)
-    parser.add_argument('--init_copy', type=_bool, default=True)
-
-    # prompt routing configs
-    parser.add_argument('--perturb_router', type=_bool, default=False)
-    parser.add_argument('--topk', type=int, default=1)
-    parser.add_argument('--stochastic', type=_bool, default=False)
-    parser.add_argument('--gumbel', type=_bool, default=False)
     args = parser.parse_args()
 
+    # Run Training
     train(args)

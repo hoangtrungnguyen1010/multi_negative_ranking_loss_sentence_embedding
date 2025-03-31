@@ -1,0 +1,9 @@
+torch>=2.0.0
+transformers>=4.30.0
+sentence-transformers>=2.2.0
+datasets>=2.10.0
+peft>=0.3.0
+scikit-learn
+numpy
+argparse
+tqdm
