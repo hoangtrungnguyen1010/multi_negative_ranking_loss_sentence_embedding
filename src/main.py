@@ -87,8 +87,11 @@ def main():
     parser.add_argument('--is_query', type=bool, default=False)
     parser.add_argument('--BASE_MODEL_NAME', type=str, default="keepitreal/vietnamese-sbert")
 
-
     args = parser.parse_args()
+    
+    if args.max_top_k < args.top_k:
+        args.max_top_k = args.top_k
+
     print(args)
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
