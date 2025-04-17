@@ -85,6 +85,7 @@ def main():
     parser.add_argument('--top_k', type=int, default=0)
     parser.add_argument('--max_top_k', type=int, default=0)
     parser.add_argument('--is_query', type=bool, default=False)
+    parser.add_argument('--BASE_MODEL_NAME', type=str, default="keepitreal/vietnamese-sbert")
 
 
     args = parser.parse_args()
@@ -93,7 +94,7 @@ def main():
 
 
     model = MultipleAdapterSentenceTransformer(
-        model_name_or_path=Config.BASE_MODEL_NAME,
+        model_name_or_path=args.BASE_MODEL_NAME,
     ).to(DEVICE)
 
     if args.load_model:
