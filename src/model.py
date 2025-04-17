@@ -10,14 +10,14 @@ from peft import LoraConfig, TaskType
 class MultipleAdapterSentenceTransformer(nn.Module):
     def __init__(self, 
                 model_name_or_path: str,
-                adapter_paths: Optional[Dict[str, str]] = None,
-                general_path: Optional[str] = None,
-                classifier_path: Optional[str] = None,
+                general_adapter_path: Optional[str] = None,
+                query_adapter_path: Optional[str] = None,
                 device: Optional[str] = None,
                 lora_config: Optional[Dict] = None):
         
         super(MultipleAdapterSentenceTransformer, self).__init__()
         self.device = device if device else ('cuda' if torch.cuda.is_available() else 'cpu')
+        self.current_adapter = None  # Track the current active adapter
 
         # Load the sentence transformer model
         self.sentence_transformer = SentenceTransformer(model_name_or_path).to(self.device)
@@ -32,38 +32,8 @@ class MultipleAdapterSentenceTransformer(nn.Module):
                 'lora_dropout': 0.1,
                 'task_type': TaskType.FEATURE_EXTRACTION
             }
-        
-        # Process adapter paths (can be None or empty for single adapter case)
-        self.adapter_paths = adapter_paths or {}
-        self.adapters = list(self.adapter_paths.keys())
-        self.use_router = len(self.adapters) > 1  # Only use router if multiple adapters
-        
-        # Initialize router only if needed (multiple adapters)
-        if self.use_router and len(self.adapters) > 0:
-            embedding_dim = self.sentence_transformer.get_sentence_embedding_dimension()
-            num_classes = len(self.adapters)
-            self.router = nn.Linear(embedding_dim, num_classes).to(self.device)
-            
-            # Load classifier if available and applicable
-            if classifier_path:
-                try:
-                    checkpoint = torch.load(classifier_path, map_location=self.device)
-                    model_state_dict = checkpoint.get("model_state_dict", {})
-                    
-                    new_state_dict = OrderedDict()
-                    for key, value in model_state_dict.items():
-                        new_key = key.replace("fc.", "")  # Remove "fc." to match model's expected keys
-                        new_state_dict[new_key] = value
-                    
-                    self.router.load_state_dict(new_state_dict)
-                    self.label_encoder = checkpoint.get("label_encoder", None)
-                except Exception as e:
-                    print(f"Warning: Could not load classifier from {classifier_path}: {e}")
-        else:
-            self.router = None
-            self.label_encoder = None
-        
-        # Configure LoRA
+
+        # Configure LoRA adapters
         lora_config_obj = LoraConfig(
             r=lora_config['r'],
             lora_alpha=lora_config['lora_alpha'],
@@ -71,137 +41,76 @@ class MultipleAdapterSentenceTransformer(nn.Module):
             task_type=lora_config['task_type']
         )
 
-        # Load general adapter if provided
-        if general_path:
-            self.sentence_transformer.add_adapter(lora_config_obj, 'general')
-            try:
-                self.sentence_transformer.load_adapter(general_path, 'general', is_trainable=True)
-            except Exception as e:
-                self.sentence_transformer.add_adapter(lora_config, 'general')
-        
-        # Load domain-specific adapters
-        for adapter_name, path in self.adapter_paths.items():
-            try:
-                # Add adapter if it doesn't exist
-                if adapter_name not in self.sentence_transformer.get_adapters():
-                    self.sentence_transformer.add_adapter(lora_config_obj, adapter_name)
-                
-                self.sentence_transformer.load_adapter(path, adapter_name, is_trainable=True)
-            except Exception as e:
-                print(f"Warning: Could not load adapter {adapter_name} from {path}: {e}")
-        
+        # Add general adapter
+        if general_adapter_path:
+            self.sentence_transformer.add_adapter(lora_config_obj, adapter_name='general')
+            self.sentence_transformer.load_adapter(general_adapter_path, 'general', is_trainable=True)
+        else:
+            self.sentence_transformer.add_adapter(lora_config_obj, adapter_name='general')
 
-    def forward(self, sentences: List[str], batch_group: Union[list, np.ndarray, torch.Tensor] = None, 
+        # Add query adapter
+        if query_adapter_path:
+            self.sentence_transformer.add_adapter(lora_config_obj, adapter_name='question')
+            self.sentence_transformer.load_adapter(query_adapter_path, 'question', is_trainable=True)
+        else:
+            self.sentence_transformer.add_adapter(lora_config_obj, adapter_name='question')
+        
+        # Set general adapter as default
+        self.set_adapter('general')
+
+    def set_adapter(self, adapter_name: str):
+        """Set the active adapter and update tracking state"""
+        if adapter_name not in ['general', 'question']:
+            raise ValueError("adapter_name must be either 'general' or 'question'")
+        
+        self.sentence_transformer.set_adapter(adapter_name)
+        self.current_adapter = adapter_name
+        return self
+
+    def set_adapter_for_training(self, adapter_name: str):
+        """Set the adapter to be used during training and ensure only its parameters are trainable"""
+        self.set_adapter(adapter_name)
+        
+        # Make only the current adapter trainable
+        for name, param in self.sentence_transformer.named_parameters():
+            if 'lora' in name:
+                if adapter_name in name:
+                    param.requires_grad = True
+                else:
+                    param.requires_grad = False
+        return self
+
+    def forward(self, sentences: List[str], is_query: bool = False,  
                 batch_size: int = 32, convert_to_numpy: bool = False, 
                 normalize_embeddings: bool = False, show_progress_bar: bool = False):
-        """Pass the input through the sentence transformer with routing logic."""
+        """Process sentences using the appropriate adapter based on is_query."""
         device = self.device
         sentences = list(sentences)  # Ensure input is a list
-        embedding_dim = self.sentence_transformer.get_sentence_embedding_dimension()
         
-        # Simple case: Single adapter, no routing needed
-        if not self.use_router:
-            # Use the default adapter (or whatever is currently set)
-            adapter_features = self.sentence_transformer.tokenize(sentences)
-            adapter_features = {key: value.to(device) for key, value in adapter_features.items()}
-            embeddings = self.sentence_transformer.forward(adapter_features)["sentence_embedding"]
-            
-            if normalize_embeddings:
-                embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
-                
-            if convert_to_numpy:
-                embeddings = embeddings.cpu().numpy()
-                
-            return embeddings
+        # Switch to appropriate adapter if needed
+        adapter_to_use = 'question' if is_query else 'general'
+        if self.current_adapter != adapter_to_use:
+            self.set_adapter(adapter_to_use)
+        # Tokenize and compute embeddings
+        adapter_features = self.sentence_transformer.tokenize(sentences)
+        adapter_features = {key: value.to(device) for key, value in adapter_features.items()}
+        embeddings = self.sentence_transformer.forward(adapter_features)["sentence_embedding"]
         
-        # Multi-adapter case with routing logic
-        
-        # Get general embeddings for routing if no batch_group is provided
-        if batch_group is None and self.has_general_adapter:
-            self.sentence_transformer.set_adapter('general')
-            
-            adapter_features = self.sentence_transformer.tokenize(sentences)
-            adapter_features = {key: value.to(device) for key, value in adapter_features.items()}
-            general_embeddings = self.sentence_transformer.forward(adapter_features)["sentence_embedding"]
-            
-            # Pass embeddings through the router
-            logits = self.router(general_embeddings)
-            adapter_probs = torch.softmax(logits, dim=1)
-            top_k_values, top_k_indices = torch.topk(adapter_probs, k=1, dim=1)
-            
-            # Create batch groups using label encoder
-            batch_indices = top_k_indices.squeeze()
-            if hasattr(self, 'label_encoder') and self.label_encoder is not None:
-                batch_group = self.label_encoder.inverse_transform(batch_indices.cpu().tolist())
-            else:
-                # Fall back to index-based mapping if no label encoder
-                batch_group = [self.adapters[idx] for idx in batch_indices.cpu().tolist()]
-                
-            use_weighted_combo = True
-        else:
-            use_weighted_combo = False
-            general_embeddings = None
-            top_k_values = None
-            
-            # Process provided batch group
-            if isinstance(batch_group, str):
-                batch_group = [batch_group] * len(sentences)
-            elif isinstance(batch_group, np.ndarray):
-                batch_group = batch_group.tolist()
-            elif isinstance(batch_group, torch.Tensor):
-                batch_group = batch_group.cpu().tolist()
-        
-        # Process each unique route in batches
-        domain_embeddings = torch.zeros((len(sentences), embedding_dim), device=device)
-        unique_routes = list(set(batch_group))
-        
-        for route in unique_routes:
-            # Set the adapter for this route
-            if route in self.adapters:
-                self.sentence_transformer.set_adapter(route)
-            else:
-                print(f"Warning: Adapter {route} not found, using default adapter")
-                if self.default_adapter:
-                    self.sentence_transformer.set_adapter(self.default_adapter)
-                continue
-            
-            # Get indices for this route
-            selected_indices = torch.tensor([idx for idx, grp in enumerate(batch_group) if grp == route], device=device)
-            if selected_indices.numel() == 0:
-                continue  # Skip if no sentences
-            
-            # Get sentences for this route
-            selected_sentences = [sentences[idx] for idx in selected_indices.tolist()]
-            
-            # Process all at once
-            adapter_features = self.sentence_transformer.tokenize(selected_sentences)
-            adapter_features = {key: value.to(device) for key, value in adapter_features.items()}
-            adapted_embeddings = self.sentence_transformer.forward(adapter_features)["sentence_embedding"]
-            
-            # Use scatter to preserve gradient flow
-            domain_embeddings.scatter_(0, selected_indices.unsqueeze(1).expand(-1, embedding_dim), adapted_embeddings)
-        
-        # Apply weighted combination with general embeddings if auto-routing was used
-        if use_weighted_combo and general_embeddings is not None and top_k_values is not None:
-            res_embeddings = domain_embeddings * top_k_values + (1 - top_k_values) * general_embeddings
-        else:
-            res_embeddings = domain_embeddings
-        
-        # Normalize if requested
+        # Normalize embeddings if requested
         if normalize_embeddings:
-            res_embeddings = torch.nn.functional.normalize(res_embeddings, p=2, dim=1)
+            embeddings = torch.nn.functional.normalize(embeddings, p=2, dim=1)
         
-        # Convert to numpy if requested
+        # Convert embeddings to numpy if requested
         if convert_to_numpy:
-            res_embeddings = res_embeddings.cpu().numpy()
+            embeddings = embeddings.cpu().numpy()
         
-        return res_embeddings
+        return embeddings
     
     def encode(
         self,
         sentences: Union[str, List[str]],
-        group: Union[int, str, List[Union[int, str]], np.ndarray, torch.Tensor] = None,
         batch_size: int = 32,
+        is_query: bool = False,
         convert_to_numpy: bool = False,
         convert_to_tensor: bool = True,
         device: str = None,
@@ -211,56 +120,44 @@ class MultipleAdapterSentenceTransformer(nn.Module):
         """
         Computes sentence embeddings efficiently with batch processing.
         """
-    
-        # Ensure sentences are in list format
         if isinstance(sentences, str):
-            sentences = [sentences]
-            
-        # Convert `group` into tensor if necessary
-        if group is not None:
-            if isinstance(group, str):  
-                group = [group]  # Convert single string to a list
-            elif isinstance(group, np.ndarray):
-                group = group.tolist()  # Convert NumPy array to a list
-            elif isinstance(group, torch.Tensor):  
-                group = group.cpu().tolist()  # Convert PyTorch tensor to a list
-    
-        if device is None:
-            device = self.device
-    
-        self.to(device)
-        self.eval()
+            sentences = [sentences]  # Convert single sentence to list
         
+        # Collect embeddings for each batch
         all_embeddings = []
-    
         with torch.no_grad():
-            for start_index in trange(0, len(sentences), batch_size, desc="Batches", disable=not show_progress_bar):
+            for start_index in range(0, len(sentences), batch_size):
                 batch = sentences[start_index : start_index + batch_size]
-    
-                # Handle batch_group properly
-                if group is not None:
-                    batch_group = group[start_index : start_index + len(batch)]
-                else:
-                    batch_group = None
-    
-                # Forward pass
                 embeddings = self.forward(
                     sentences=batch,
-                    batch_group=batch_group,
+                    is_query=is_query,
                     batch_size=batch_size,
                     convert_to_numpy=False,
                     normalize_embeddings=normalize_embeddings,
-                    show_progress_bar=False
+                    show_progress_bar=show_progress_bar
                 )
-    
                 all_embeddings.append(embeddings)
-    
-        # Concatenate results and apply conversion if needed
-        if len(all_embeddings) > 0:
+        
+        # Concatenate results
+        if all_embeddings:
             all_embeddings = torch.cat(all_embeddings, dim=0)
             if convert_to_numpy:
                 all_embeddings = all_embeddings.cpu().numpy()
-        else:
-            all_embeddings = np.array([]) if convert_to_numpy else torch.empty(0, device=device)
-    
+        
         return all_embeddings
+    
+    def save_adapters(self, general_adapter_path: str, query_adapter_path: str):
+        """Save both adapters to specified paths"""
+        # Save general adapter
+        current_adapter = self.current_adapter
+        
+        self.set_adapter('general')
+        self.sentence_transformer.save_adapter(general_adapter_path, 'general')
+        
+        self.set_adapter('question')
+        self.sentence_transformer.save_adapter(query_adapter_path, 'question')
+        
+        # Restore original adapter state
+        self.set_adapter(current_adapter)
+        
+        return self

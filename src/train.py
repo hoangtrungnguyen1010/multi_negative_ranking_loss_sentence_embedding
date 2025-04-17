@@ -119,18 +119,20 @@ def train_model(
     val_data,
     patience,
     accumulation_steps,
-    val_batch_size=128,
-    eval_steps=10,
+    val_batch_size=32,
+    eval_steps=None,
     batch_size=16,
     epochs=10,
     top_k = 5,
     learning_rate=2e-5,
     model_save_path="best_model.pth",
     device=None,
+    is_query = False
 ):
     """
     Train and validate the model with gradient accumulation.
     """
+    
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
@@ -140,6 +142,8 @@ def train_model(
     optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad == True], lr=learning_rate, weight_decay=1e-2)
     train_dataloader = NoDuplicatesDataLoader(train_data, batch_size=batch_size)
     val_dataloader = NoDuplicatesDataLoader(val_data, batch_size=val_batch_size)
+    if not eval_steps:
+        eval_steps = len(train_dataloader)
 
     best_loss = float("inf")
     early_stop_counter = 0
@@ -151,13 +155,16 @@ def train_model(
         
         for batch_idx, (queries, positives, negatives, positive_groups, negative_groups) in enumerate(tqdm(train_dataloader, desc="🔄 Training", leave=True)):
             step += 1  # Count each batch as a step
-            
             # Compute embeddings
-            anchor_embeddings = model.forward(queries, batch_size=batch_size)
-            positive_embeddings = model.forward(positives, batch_group = positive_groups, batch_size=batch_size)
+            anchor_embeddings = model.forward(queries, is_query = is_query, batch_size=batch_size)
+            positive_embeddings = model.forward(positives, batch_size=batch_size)
 
-            # Compute loss
-            loss = multiple_negatives_ranking_loss(anchor_embeddings, positive_embeddings)
+            if not negatives:
+                loss = multiple_negatives_ranking_loss(anchor_embeddings, positive_embeddings)
+            else:
+                negatives_embeddings = model.forward(negatives, batch_size=batch_size).view(len(queries), top_k, -1)
+                loss = multiple_negatives_ranking_loss(anchor_embeddings, positive_embeddings, negatives_embeddings)
+
             training_loss += loss.item()
 
             # Backpropagate
@@ -177,29 +184,35 @@ def train_model(
                 with torch.no_grad():
                     print("Validating...")
                     for queries, positives, negatives, positive_groups, negative_groups in tqdm(val_dataloader, desc="🔄 Validation", leave=True):
-                        anchor_embeddings = model.encode(queries, batch_size=val_batch_size, convert_to_tensor=True, show_progress_bar = False)
-                        positive_embeddings = model.encode(positives, group = positive_groups, batch_size=val_batch_size, show_progress_bar = False)
-                        loss = multiple_negatives_ranking_loss(anchor_embeddings, positive_embeddings)
+                        anchor_embeddings = model.encode(queries, is_query = is_query, batch_size=val_batch_size, convert_to_tensor=True, show_progress_bar = False)
+                        positive_embeddings = model.encode(positives, batch_size=val_batch_size, show_progress_bar = False)
+                        
+                        if not negatives:
+                            loss = multiple_negatives_ranking_loss(anchor_embeddings, positive_embeddings)
+                        else:
+                            negatives_embeddings = model.encode(negatives, batch_size=batch_size).view(len(queries), top_k, -1)
+                            loss = multiple_negatives_ranking_loss(anchor_embeddings, positive_embeddings, negatives_embeddings)
+                        
                         val_loss += loss.item()
                     
                 avg_val_loss = val_loss / len(val_dataloader)
-                print(f"📉 Validation Loss: {avg_val_loss:.4f}")
+                print(f" Validation Loss: {avg_val_loss:.4f}")
                 
                 if avg_val_loss < best_loss:
                     best_loss = avg_val_loss
                     early_stop_counter = 0
                     torch.save(model.state_dict(), model_save_path)
-                    print("✅ Best model saved!")
+                    print("Best model saved!")
                 else:
                     early_stop_counter += 1
-                    print(f"⏳ No improvement, patience: {early_stop_counter}/{patience}")
+                    print(f"No improvement, patience: {early_stop_counter}/{patience}")
                 
-                if early_stop_counter >= patience:
-                    print("⏹️ Early Stopping Triggered! Stopping Training.")
+                if early_stop_counter > patience:
+                    print("Early Stopping Triggered! Stopping Training.")
                     return model
                 
                 model.train()
-    
+
     return model
 
 
@@ -207,11 +220,13 @@ def evaluate_model(
     list_of_queries,
     list_of_groundtruth,
     list_of_docs,
-    model
+    model,
+    is_query = False,
+    batch_size=128
 ):
     # Compute embeddings
-    question_embeddings = model.encode(list_of_queries, batch_size=128, convert_to_numpy=True)
-    context_embeddings = model.encode(list_of_docs['context'], group = list_of_docs['group'], batch_size=128, convert_to_numpy=True)
+    question_embeddings = model.encode(list_of_queries, is_query = is_query, batch_size=batch_size, convert_to_numpy=True)
+    context_embeddings = model.encode(list_of_docs['context'], batch_size=batch_size, convert_to_numpy=True)
 
     # ✅ Normalize embeddings for cosine similarity search
     faiss.normalize_L2(context_embeddings)
@@ -244,3 +259,4 @@ def evaluate_model(
     print(f"Mean Reciprocal Rank (MRR): {mrr:.4f}")
     print(f"Mean Average Precision (MAP@{top_k}): {map_k:.4f}")
     print(f"Normalized Discounted Cumulative Gain (NDCG@{top_k}): {ndcg_k:.4f}")
+    return ndcg_k

@@ -7,3 +7,6 @@ scikit-learn
 numpy
 argparse
 tqdm
+huggingface
+datasets
+faiss-gpu

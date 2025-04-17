@@ -10,18 +10,7 @@ Ensure you have Python 3.7+ and install dependencies with:
 pip install -r requirements.txt
 ```
 
-## Requirements
 
-```
-torch>=1.10.0
-transformers>=4.15.0
-sentence-transformers>=2.2.0
-datasets>=2.0.0
-adapter-transformers>=3.0.0
-tqdm>=4.62.0
-numpy>=1.20.0
-scikit-learn>=1.0.0
-```
 
 ## Quick Start
 

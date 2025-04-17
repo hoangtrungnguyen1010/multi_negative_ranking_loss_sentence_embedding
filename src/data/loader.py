@@ -8,15 +8,30 @@ def load_viir_dataset(model_name):
     This function returns the dataset as a dictionary.
     """
     dataset = load_dataset(model_name)
+    
+    # Renaming columns if they exist
+    if 'question' in dataset['train'].column_names:
+        dataset = dataset.rename_columns({'question': 'query'})
+    if 'context' in dataset['train'].column_names:
+        dataset = dataset.rename_columns({'context': 'positive'})
+    if 'group' in dataset['train'].column_names:
+        dataset = dataset.rename_columns({'group': 'positive_group'})
 
     # Accessing the different splits (train, validation, test)
+    if model_name == 'squad':
+        val_data = dataset['validation']
+        test_data = val_data.train_test_split(test_size=0.5, seed=42)  # Random split
+        val_data = test_data['train']
+        test_data = test_data['test']
+    else:
+        val_data = dataset['validation']
+        test_data = dataset['test']
+
     train_data = dataset['train']
-    val_data = dataset['validation']
-    test_data = dataset['test']
-    
+
     return {'train': train_data, 'validation': val_data, 'test': test_data}
 
-def get_hard_negatives(question_embeddings,ground_contexts, contexts, groups, context_embeddings, num_negatives=TOP_K):
+def get_hard_negatives(question_embeddings,ground_contexts, contexts, groups, context_embeddings, num_negatives=5):
     """Retrieve hard negatives using cosine similarity (optimized batch processing)"""
     
     # Compute pairwise cosine similarity
@@ -84,40 +99,53 @@ def process_dataset(original_dataset):
     return processed_dataset
 
 
-def prepare_for_training_with_hard_negatives(dataset, model, top_k = 5, batch_size= 128):
+def prepare_for_training_with_hard_negatives(dataset, model, top_k = 5, batch_size= 128, group = None, is_exploded = None):
+    if top_k <1:
+        return dataset
     """prepare dataset for training, create hard sample if it's needed
     """
         # Extract QA pairs (Train + Validation)
-    questions_train = [item["question"] for item in dataset]
-    contexts_train = [item["context"] for item in dataset]
-    groups_train = [item["group"] for item in dataset]
+    questions_train = [item["query"] for item in dataset if not group or item['positive_group'] == group]
+    contexts_train = [item["positive"] for item in dataset if not group or item['positive_group'] == group]
 
-    context_to_group_train = {item["context"]: item["group"] for item in dataset}
-
-    unique_contexts_train = list(context_to_group_train.keys())
-    unique_group_train = [context_to_group_train[context] for context in unique_contexts_train]
-
-    # ==========================
-    # Encode Questions in Batches First (Faster)
-    # ==========================
-    question_embeddings_train = model.encode(questions_train, batch_size=batch_size, convert_to_numpy=True, normalize_embeddings=True)
-
-    # Encode contexts in Batches
-    context_embeddings_train = model.encode(unique_contexts_train, batch_size=batch_size, convert_to_numpy=True, normalize_embeddings=True)
-
-    hard_negatives_train, negative_groups_train = get_hard_negatives(question_embeddings_train, contexts_train, unique_contexts_train, unique_group_train, context_embeddings_train, num_negatives=top_k)
-    train_data_dict = {
+    groups_train = [item["positive_group"] for item in dataset if not group or item['positive_group'] == group]
+    
+    if top_k == 0:
+        train_data_dict = {
         "query": questions_train,
         "positive": contexts_train,
-        "negatives": hard_negatives_train, # List of negatives
         "positive_group": groups_train,
-        "negative_groups": negative_groups_train
-
     }
+        
+    else:
+        context_to_group_train = {item["positive"]: item["positive_group"] for item in dataset}
+
+        unique_contexts_train = list(context_to_group_train.keys())
+        unique_group_train = [context_to_group_train[context] for context in unique_contexts_train]
+
+        # ==========================
+        # Encode Questions in Batches First (Faster)
+        # ==========================
+        question_embeddings_train = model.encode(questions_train, batch_size=batch_size, convert_to_numpy=True, normalize_embeddings=True)
+
+        # Encode contexts in Batches
+        context_embeddings_train = model.encode(unique_contexts_train, batch_size=batch_size, convert_to_numpy=True, normalize_embeddings=True)
+
+        hard_negatives_train, negative_groups_train = get_hard_negatives(question_embeddings_train, contexts_train, unique_contexts_train, unique_group_train, context_embeddings_train, num_negatives=top_k)
+        train_data_dict = {
+            "query": questions_train,
+            "positive": contexts_train,
+            "negatives": hard_negatives_train, # List of negatives
+            "positive_group": groups_train,
+            "negative_groups": negative_groups_train
+
+        }
 
     # ==========================
     # Convert to Hugging Face Dataset
     # ==========================
     train_dataset = Dataset.from_dict(train_data_dict)
-    train_dataset = process_dataset(train_dataset)
+    
+    if top_k > 1 and is_exploded:
+        train_dataset = process_dataset(train_dataset)
     return train_dataset
