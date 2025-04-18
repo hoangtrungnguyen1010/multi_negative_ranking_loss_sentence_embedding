@@ -10,3 +10,4 @@ tqdm
 huggingface
 datasets
 faiss-gpu
+faiss-gpu-cu12

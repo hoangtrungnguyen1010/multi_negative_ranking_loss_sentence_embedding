@@ -22,8 +22,8 @@ def adaptive_training(model, dataset, args, max_top_k=5, min_improvement=0.01, m
         # epochs = max(1, math.ceil(initial_epochs / (top_k + 1)))
         print(f"\n🔁 Training with top_k={top_k}, epochs={initial_epochs}, batch_size={batch_size}")
         print(args.is_query)
-        dataset['train'] = prepare_for_training_with_hard_negatives(dataset['train'], model, top_k=top_k, group=args.group)
-        dataset['validation'] = prepare_for_training_with_hard_negatives(dataset['validation'], model, top_k=top_k, group=args.group)
+        dataset['train'] = prepare_for_training_with_hard_negatives(dataset['train'], model, top_k=top_k)
+        dataset['validation'] = prepare_for_training_with_hard_negatives(dataset['validation'], model, top_k=top_k)
 
         model = train_model(
             model=model,
@@ -45,7 +45,6 @@ def adaptive_training(model, dataset, args, max_top_k=5, min_improvement=0.01, m
             [item["positive"] for item in dataset["validation"]],
             {
                 'context': [item["positive"] for item in dataset["validation"]],
-                'group': [item["positive_group"] for item in dataset["validation"]]
             },
             model,
             is_query = args.is_query
@@ -110,20 +109,15 @@ def main():
         model = adaptive_training(model, dataset, args, max_top_k=args.max_top_k)
 
     if args.mode in ['eval', 'both']:
-        context_to_group = {item["positive"]: item["positive_group"] for item in dataset["test"]}
-        contexts = list(context_to_group.keys())
-        context_groups = [context_to_group[context] for context in contexts]
+        questions = [item["query"] for item in dataset["test"]]
+        ground_truth_contexts = [item["positive"] for item in dataset["test"]]
 
-        list_of_docs = {'context': contexts, 'group': context_groups}
+        contexts = list(set(ground_truth_contexts))
 
-        if args.group:
-            questions = [item["query"] for item in dataset["test"] if item['positive_group'] == args.group]
-            ground_truth_contexts = [item["positive"] for item in dataset["test"] if item['positive_group'] == args.group]
-        else:
-            questions = [item["query"] for item in dataset["test"]]
-            ground_truth_contexts = [item["positive"] for item in dataset["test"]]
+        list_of_docs = {'context': contexts}
 
-        evaluate_model(questions, ground_truth_contexts, list_of_docs, model, is_query=args.is_query, batch_size = 16)
+
+        evaluate_model(questions, ground_truth_contexts, list_of_docs, model, is_query=args.is_query, batch_size = 128)
 
 if __name__ == "__main__":
     main()
