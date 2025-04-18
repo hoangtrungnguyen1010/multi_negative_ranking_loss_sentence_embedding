@@ -374,7 +374,8 @@ def train_dual_adapter_model(
             if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(train_dataloader):
                 optimizer.step()
                 optimizer.zero_grad()
-            
+        print(f"Training loss: {general_train_loss/eval_steps:.4f}")
+
         
         # Phase 2: Train Query Adapter
         print("\n--- Training Query Adapter ---")
@@ -443,7 +444,8 @@ def train_dual_adapter_model(
         
         joint_train_loss = 0.0
         optimizer.zero_grad()
-        
+        print(f"Training loss: {query_train_loss/eval_steps:.4f}")
+
         for batch_idx, (queries, positives, negatives) in enumerate(tqdm(train_dataloader, desc="Joint Training")):
             global_step += 1
             
@@ -490,13 +492,12 @@ def train_dual_adapter_model(
             if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(train_dataloader):
                 optimizer.step()
                 optimizer.zero_grad()
-            
+        print(f"Training loss: {joint_train_loss/eval_steps:.4f}")
+
         
         # Full evaluation at the end of each epoch
         model.eval()
         val_loss = 0
-        print(f"Training loss: {training_loss/eval_steps:.4f}")
-        training_loss = 0
         
         with torch.no_grad():
             print("Validating...")
