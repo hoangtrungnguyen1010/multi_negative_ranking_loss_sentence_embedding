@@ -32,6 +32,9 @@ class MultipleAdapterSentenceTransformer(nn.Module):
                 'lora_dropout': 0.1,
                 'task_type': TaskType.FEATURE_EXTRACTION
             }
+            
+        self.GENERAL_ADAPTER = 'general'
+        self.QUERY_ADAPTER = 'question'
 
         # Configure LoRA adapters
         lora_config_obj = LoraConfig(
@@ -43,25 +46,25 @@ class MultipleAdapterSentenceTransformer(nn.Module):
 
         # Add general adapter
         if general_adapter_path:
-            self.sentence_transformer.add_adapter(lora_config_obj, adapter_name='general')
-            self.sentence_transformer.load_adapter(general_adapter_path, 'general', is_trainable=True)
+            self.sentence_transformer.add_adapter(lora_config_obj, adapter_name=self.GENERAL_ADAPTER)
+            self.sentence_transformer.load_adapter(general_adapter_path, self.GENERAL_ADAPTER, is_trainable=True)
         else:
-            self.sentence_transformer.add_adapter(lora_config_obj, adapter_name='general')
+            self.sentence_transformer.add_adapter(lora_config_obj, adapter_name=self.GENERAL_ADAPTER)
 
         # Add query adapter
         if query_adapter_path:
-            self.sentence_transformer.add_adapter(lora_config_obj, adapter_name='question')
-            self.sentence_transformer.load_adapter(query_adapter_path, 'question', is_trainable=True)
+            self.sentence_transformer.add_adapter(lora_config_obj, adapter_name=self.QUERY_ADAPTER)
+            self.sentence_transformer.load_adapter(query_adapter_path, self.QUERY_ADAPTER, is_trainable=True)
         else:
-            self.sentence_transformer.add_adapter(lora_config_obj, adapter_name='question')
+            self.sentence_transformer.add_adapter(lora_config_obj, adapter_name=self.QUERY_ADAPTER)
         
         # Set general adapter as default
-        self.set_adapter('general')
+        self.set_adapter(self.GENERAL_ADAPTER)
 
     def set_adapter(self, adapter_name: str):
         """Set the active adapter and update tracking state"""
-        if adapter_name not in ['general', 'question']:
-            raise ValueError("adapter_name must be either 'general' or 'question'")
+        if adapter_name not in [self.GENERAL_ADAPTER, self.QUERY_ADAPTER]:
+            raise ValueError("adapter_name must be either self.GENERAL_ADAPTER or self.QUERY_ADAPTER")
         
         self.sentence_transformer.set_adapter(adapter_name)
         self.current_adapter = adapter_name
@@ -88,7 +91,7 @@ class MultipleAdapterSentenceTransformer(nn.Module):
         sentences = list(sentences)  # Ensure input is a list
         
         # Switch to appropriate adapter if needed
-        adapter_to_use = 'question' if is_query else 'general'
+        adapter_to_use = self.QUERY_ADAPTER if is_query else self.GENERAL_ADAPTER
         if self.current_adapter != adapter_to_use:
             self.set_adapter(adapter_to_use)
         # Tokenize and compute embeddings
@@ -151,11 +154,11 @@ class MultipleAdapterSentenceTransformer(nn.Module):
         # Save general adapter
         current_adapter = self.current_adapter
         
-        self.set_adapter('general')
-        self.sentence_transformer.save_adapter(general_adapter_path, 'general')
+        self.set_adapter(self.GENERAL_ADAPTER)
+        self.sentence_transformer.save_adapter(general_adapter_path, self.GENERAL_ADAPTER)
         
-        self.set_adapter('question')
-        self.sentence_transformer.save_adapter(query_adapter_path, 'question')
+        self.set_adapter(self.QUERY_ADAPTER)
+        self.sentence_transformer.save_adapter(query_adapter_path, self.QUERY_ADAPTER)
         
         # Restore original adapter state
         self.set_adapter(current_adapter)
