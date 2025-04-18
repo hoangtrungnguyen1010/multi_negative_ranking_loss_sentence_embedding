@@ -10,10 +10,8 @@ def collate_fn(batch):
     positives = [item.get('positive', '') for item in batch]
     
     negatives = [neg for item in batch for neg in item.get('negatives', [])]
-    positive_groups = [item.get('positive_group', '') for item in batch]
-    negative_groups = [ng for item in batch for ng in item.get('negative_groups', [])]
 
-    return queries, positives, negatives, positive_groups, negative_groups
+    return queries, positives, negatives
 
 class NoDuplicatesDataLoader:
     def __init__(self, train_dataset, batch_size: int):

@@ -153,7 +153,7 @@ def train_model(
     for epoch in range(epochs):
         print(f"\n🚀 Epoch {epoch + 1}/{epochs}")
         
-        for batch_idx, (queries, positives, negatives, positive_groups, negative_groups) in enumerate(tqdm(train_dataloader, desc="🔄 Training", leave=True)):
+        for batch_idx, (queries, positives, negatives) in enumerate(tqdm(train_dataloader, desc="🔄 Training", leave=True)):
             step += 1  # Count each batch as a step
             # Compute embeddings
             anchor_embeddings = model.forward(queries, is_query = is_query, batch_size=batch_size)
@@ -183,7 +183,7 @@ def train_model(
                 
                 with torch.no_grad():
                     print("Validating...")
-                    for queries, positives, negatives, positive_groups, negative_groups in tqdm(val_dataloader, desc="🔄 Validation", leave=True):
+                    for queries, positives, negatives in tqdm(val_dataloader, desc="🔄 Validation", leave=True):
                         anchor_embeddings = model.encode(queries, is_query = is_query, batch_size=val_batch_size, convert_to_tensor=True, show_progress_bar = False)
                         positive_embeddings = model.encode(positives, batch_size=val_batch_size, show_progress_bar = False)
                         
