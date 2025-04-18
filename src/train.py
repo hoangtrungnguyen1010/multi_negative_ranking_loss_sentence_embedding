@@ -127,7 +127,8 @@ def train_model(
     learning_rate=2e-5,
     model_save_path="best_model.pth",
     device=None,
-    is_query = False
+    is_query = False,
+    load_best_model_at_the_end = True
 ):
     """
     Train and validate the model with gradient accumulation.
@@ -212,10 +213,370 @@ def train_model(
                     return model
                 
                 model.train()
+                
+    if load_best_model_at_the_end:
+        checkpoint = torch.load(model_save_path, map_location=model.device)
+        model.load_state_dict(checkpoint)
 
     return model
 
+def train_dual_adapter_model(
+    model,
+    train_data,
+    val_data,
+    patience=5,
+    accumulation_steps=4,
+    val_batch_size=32,
+    eval_steps=None,
+    batch_size=16,
+    epochs=10,
+    top_k=5,
+    learning_rate=2e-5,
+    model_save_path="best_model",
+    device=None,
+    consistency_loss_weight=0.1  # Weight for the consistency loss between adapters
+):
+    """
+    Train a dual-adapter model with improved training strategy.
+    This implementation handles general and query adapters consistently
+    and ensures proper knowledge transfer between them.
+    
+    Args:
+        model: The MultipleAdapterSentenceTransformer model
+        train_data: Training data as (queries, positives, [negatives]) tuples
+        val_data: Validation data in the same format
+        patience: Early stopping patience
+        accumulation_steps: Number of steps to accumulate gradients
+        val_batch_size: Batch size for validation
+        eval_steps: Number of steps between evaluations (default: one epoch)
+        batch_size: Training batch size
+        epochs: Number of training epochs
+        top_k: Number of negative examples per positive
+        learning_rate: Learning rate for optimizer
+        model_save_path: Path to save the best model (without extension)
+        device: Device to use (defaults to CUDA if available)
+        consistency_loss_weight: Weight for the consistency loss
+    """
+    import torch
+    from torch.utils.data import DataLoader
+    from tqdm.auto import tqdm
+    import os
+    import numpy as np
+    
+    if device is None:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    model.to(device)
+    model.train()
+    
+    # Verify adapter names match the model's constants
+    GENERAL_ADAPTER = model.GENERAL_ADAPTER
+    QUERY_ADAPTER = model.QUERY_ADAPTER
+    
+    # Create dataloaders
+    train_dataloader = NoDuplicatesDataLoader(train_data, batch_size=batch_size)
+    val_dataloader = NoDuplicatesDataLoader(val_data, batch_size=val_batch_size)
+    
+    if not eval_steps:
+        eval_steps = len(train_dataloader)
+    
+    # Create optimizer with all trainable parameters
+    # We'll make specific parameters trainable during training phases
+    optimizer = torch.optim.AdamW(
+        [p for p in model.parameters() if p.requires_grad], 
+        lr=learning_rate, 
+        weight_decay=1e-2
+    )
+    
+    
+    # Training loop
+    best_metrics = {
+        "general_val_loss": float("inf"),
+        "query_val_loss": float("inf"),
+        "combined_val_loss": float("inf")
+    }
+    early_stop_counter = 0
+    global_step = 0
+    
+    for epoch in range(epochs):
+        print(f"\n===== Epoch {epoch + 1}/{epochs} =====")
+        
+        # Phase 1: Train General Adapter
+        print("\n--- Training General Adapter ---")
+        model.set_adapter_for_training(GENERAL_ADAPTER)
+        
+        general_train_loss = 0.0
+        optimizer.zero_grad()
+        
+        for batch_idx, (queries, positives, negatives) in enumerate(tqdm(train_dataloader, desc="General Adapter Training")):
+            global_step += 1
+            
+            # Get embeddings with general adapter
+            with torch.set_grad_enabled(True):
+                # Document embeddings (using general adapter)
+                positive_embeddings = model.forward(positives, is_query=False, batch_size=batch_size)
+                
+                # Query embeddings (using general adapter for both)
+                anchor_embeddings = model.forward(queries, is_query=False, batch_size=batch_size)
+                
+                # Calculate loss
+                if negatives is None or not negatives:
+                    loss = multiple_negatives_ranking_loss(anchor_embeddings, positive_embeddings)
+                else:
+                    # Process negatives
+                    neg_embeddings = []
+                    for neg_batch in torch.split(torch.tensor(range(len(negatives))), batch_size):
+                        batch_negs = [negatives[i] for i in neg_batch]
+                        batch_neg_emb = model.forward(batch_negs, is_query=False, batch_size=batch_size)
+                        neg_embeddings.append(batch_neg_emb)
+                    
+                    negative_embeddings = torch.cat(neg_embeddings, dim=0)
+                    negative_embeddings = negative_embeddings.view(len(queries), top_k, -1)
+                    loss = multiple_negatives_ranking_loss(anchor_embeddings, positive_embeddings, negative_embeddings)
+                
+                # Scale loss for gradient accumulation
+                loss = loss / accumulation_steps
+                loss.backward()
+                general_train_loss += loss.item() * accumulation_steps
+            
+            # Update weights with accumulated gradients
+            if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(train_dataloader):
+                optimizer.step()
+                optimizer.zero_grad()
+            
+            # Evaluation
+            if global_step % eval_steps == 0:
+                evaluate_and_save(epoch, global_step, "general_only")
+        
+        # Phase 2: Train Query Adapter
+        print("\n--- Training Query Adapter ---")
+        model.set_adapter_for_training(QUERY_ADAPTER)
+        
+        query_train_loss = 0.0
+        optimizer.zero_grad()
+        
+        for batch_idx, (queries, positives, negatives) in enumerate(tqdm(train_dataloader, desc="Query Adapter Training")):
+            global_step += 1
+            
+            # Get embeddings with query adapter
+            with torch.set_grad_enabled(True):
+                # Document embeddings (using general adapter)
+                model.set_adapter(GENERAL_ADAPTER)
+                positive_embeddings = model.forward(positives, is_query=False, batch_size=batch_size).detach()
+                
+                # Switch to query adapter for queries
+                model.set_adapter_for_training(QUERY_ADAPTER)  # Ensure we're training the query adapter
+                anchor_embeddings = model.forward(queries, is_query=True, batch_size=batch_size)
+                
+                # Calculate loss
+                if negatives is None or not negatives:
+                    loss = multiple_negatives_ranking_loss(anchor_embeddings, positive_embeddings)
+                else:
+                    # Process negatives with general adapter (no gradients needed)
+                    model.set_adapter(GENERAL_ADAPTER)
+                    neg_embeddings = []
+                    for neg_batch in torch.split(torch.tensor(range(len(negatives))), batch_size):
+                        batch_negs = [negatives[i] for i in neg_batch]
+                        with torch.no_grad():
+                            batch_neg_emb = model.forward(batch_negs, is_query=False, batch_size=batch_size)
+                        neg_embeddings.append(batch_neg_emb)
+                    
+                    negative_embeddings = torch.cat(neg_embeddings, dim=0)
+                    negative_embeddings = negative_embeddings.view(len(queries), top_k, -1)
+                    
+                    # Switch back to query adapter for computing loss
+                    model.set_adapter_for_training(QUERY_ADAPTER)
+                    loss = multiple_negatives_ranking_loss(anchor_embeddings, positive_embeddings, negative_embeddings)
+                
+                # Add consistency loss between query and general adapters for queries
+                model.set_adapter(GENERAL_ADAPTER)
+                with torch.no_grad():
+                    general_query_embeddings = model.forward(queries, is_query=False, batch_size=batch_size)
+                
+                model.set_adapter_for_training(QUERY_ADAPTER)
+                consistency_loss = 1 - cos_sim(anchor_embeddings, general_query_embeddings).mean()
+                
+                # Combine losses
+                total_loss = loss + consistency_loss_weight * consistency_loss
+                
+                # Scale loss for gradient accumulation
+                total_loss = total_loss / accumulation_steps
+                total_loss.backward()
+                query_train_loss += total_loss.item() * accumulation_steps
+            
+            # Update weights with accumulated gradients
+            if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(train_dataloader):
+                optimizer.step()
+                optimizer.zero_grad()
+            
+            # Evaluation
+            if global_step % eval_steps == 0:
+                evaluate_and_save(epoch, global_step, "query_only")
+        
+        # Phase 3: Joint Training
+        print("\n--- Joint Training Phase ---")
+        
+        # Enable both adapters for training
+        for name, param in model.named_parameters():
+            if 'lora' in name and (GENERAL_ADAPTER in name or QUERY_ADAPTER in name):
+                param.requires_grad = True
+        
+        joint_train_loss = 0.0
+        optimizer.zero_grad()
+        
+        for batch_idx, (queries, positives, negatives) in enumerate(tqdm(train_dataloader, desc="Joint Training")):
+            global_step += 1
+            
+            with torch.set_grad_enabled(True):
+                # Get document embeddings with general adapter
+                model.set_adapter(GENERAL_ADAPTER)
+                positive_embeddings = model.forward(positives, is_query=False, batch_size=batch_size)
+                
+                # Get query embeddings with query adapter
+                model.set_adapter(QUERY_ADAPTER)
+                query_embeddings = model.forward(queries, is_query=True, batch_size=batch_size)
+                
+                # Also get query embeddings with general adapter (for consistency)
+                model.set_adapter(GENERAL_ADAPTER)
+                general_query_embeddings = model.forward(queries, is_query=False, batch_size=batch_size)
+                
+                # Ranking loss
+                if negatives is None or not negatives:
+                    ranking_loss = multiple_negatives_ranking_loss(query_embeddings, positive_embeddings)
+                else:
+                    # Process negatives with general adapter
+                    neg_embeddings = []
+                    for neg_batch in torch.split(torch.tensor(range(len(negatives))), batch_size):
+                        batch_negs = [negatives[i] for i in neg_batch]
+                        batch_neg_emb = model.forward(batch_negs, is_query=False, batch_size=batch_size)
+                        neg_embeddings.append(batch_neg_emb)
+                    
+                    negative_embeddings = torch.cat(neg_embeddings, dim=0)
+                    negative_embeddings = negative_embeddings.view(len(queries), top_k, -1)
+                    ranking_loss = multiple_negatives_ranking_loss(query_embeddings, positive_embeddings, negative_embeddings)
+                
+                # Add consistency loss between query and general adapters
+                consistency_loss = 1 - cos_sim(query_embeddings, general_query_embeddings).mean()
+                
+                # Combine losses
+                total_loss = ranking_loss + consistency_loss_weight * consistency_loss
+                
+                # Scale loss for gradient accumulation
+                total_loss = total_loss / accumulation_steps
+                total_loss.backward()
+                joint_train_loss += total_loss.item() * accumulation_steps
+            
+            # Update weights with accumulated gradients
+            if (batch_idx + 1) % accumulation_steps == 0 or (batch_idx + 1) == len(train_dataloader):
+                optimizer.step()
+                optimizer.zero_grad()
+            
+            # Evaluation
+            if global_step % eval_steps == 0:
+                evaluate_and_save(epoch, global_step, "joint")
+        
+        # Full evaluation at the end of each epoch
+        evaluate_and_save(epoch, global_step, "end_of_epoch")
+        
+        # Check for early stopping
+        if early_stop_counter >= patience:
+            print(f"Early stopping triggered after {epoch + 1} epochs")
+            break
+    
+    # Load best model before returning
+    best_model_path = f"{model_save_path}_best_combined.pt"
+    if os.path.exists(best_model_path):
+        model.load_state_dict(torch.load(best_model_path))
+        print(f"Loaded best model from {best_model_path}")
+    
+    return model
 
+    # Evaluation function (nested to access local variables)
+    def evaluate_and_save(epoch, step, phase):
+        model.eval()
+        
+        general_val_loss = 0.0
+        query_val_loss = 0.0
+        combined_val_loss = 0.0
+        consistency_val_loss = 0.0
+        
+        print(f"\nEvaluating at epoch {epoch+1}, step {step} ({phase})...")
+        
+        with torch.no_grad():
+            for queries, positives, negatives in tqdm(val_dataloader, desc="Validation"):
+                # General adapter evaluation
+                model.set_adapter(GENERAL_ADAPTER)
+                general_query_embeddings = model.encode(queries, is_query=False, batch_size=val_batch_size, show_progress_bar=False)
+                general_positive_embeddings = model.encode(positives, is_query=False, batch_size=val_batch_size, show_progress_bar=False)
+                
+                # Query adapter evaluation
+                model.set_adapter(QUERY_ADAPTER)
+                query_query_embeddings = model.encode(queries, is_query=True, batch_size=val_batch_size, show_progress_bar=False)
+                
+                # Calculate general adapter loss
+                if negatives is None or not negatives:
+                    general_loss = multiple_negatives_ranking_loss(general_query_embeddings, general_positive_embeddings)
+                else:
+                    model.set_adapter(GENERAL_ADAPTER)
+                    negative_embeddings = model.encode(negatives, is_query=False, batch_size=val_batch_size, show_progress_bar=False)
+                    negative_embeddings = negative_embeddings.view(len(queries), top_k, -1)
+                    general_loss = multiple_negatives_ranking_loss(general_query_embeddings, general_positive_embeddings, negative_embeddings)
+                
+                # Calculate query adapter loss
+                if negatives is None or not negatives:
+                    query_loss = multiple_negatives_ranking_loss(query_query_embeddings, general_positive_embeddings)
+                else:
+                    query_loss = multiple_negatives_ranking_loss(query_query_embeddings, general_positive_embeddings, negative_embeddings)
+                
+                # Consistency loss
+                consistency_loss = 1 - cos_sim(query_query_embeddings, general_query_embeddings).mean()
+                
+                # Combined loss
+                combined_loss = query_loss + general_loss + consistency_loss_weight * consistency_loss
+                
+                # Accumulate losses
+                general_val_loss += general_loss.item()
+                query_val_loss += query_loss.item()
+                consistency_val_loss += consistency_loss.item()
+                combined_val_loss += combined_loss.item()
+        
+        # Average losses
+        num_batches = len(val_dataloader)
+        general_val_loss /= num_batches
+        query_val_loss /= num_batches
+        consistency_val_loss /= num_batches
+        combined_val_loss /= num_batches
+        
+        # Print metrics
+        print(f"Validation Results (Phase: {phase}):")
+        print(f"  General Adapter Loss: {general_val_loss:.4f}")
+        print(f"  Query Adapter Loss: {query_val_loss:.4f}")
+        print(f"  Consistency Loss: {consistency_val_loss:.4f}")
+        print(f"  Combined Loss: {combined_val_loss:.4f}")
+        
+        # Save best models (separately for each metric)
+        if general_val_loss < best_metrics["general_val_loss"]:
+            best_metrics["general_val_loss"] = general_val_loss
+            torch.save(model.state_dict(), f"{model_save_path}_best_general.pt")
+            print(f"New best general adapter model saved!")
+        
+        if query_val_loss < best_metrics["query_val_loss"]:
+            best_metrics["query_val_loss"] = query_val_loss
+            torch.save(model.state_dict(), f"{model_save_path}_best_query.pt")
+            print(f"New best query adapter model saved!")
+        
+        # Use combined loss for early stopping
+        if combined_val_loss < best_metrics["combined_val_loss"]:
+            best_metrics["combined_val_loss"] = combined_val_loss
+            torch.save(model.state_dict(), f"{model_save_path}_best_combined.pt")
+            print(f"New best combined model saved!")
+            nonlocal early_stop_counter
+            early_stop_counter = 0
+        else:
+            early_stop_counter += 1
+            print(f"No improvement. Early stopping counter: {early_stop_counter}/{patience}")
+        
+        model.train()
 def evaluate_model(
     list_of_queries,
     list_of_groundtruth,
