@@ -276,7 +276,7 @@ def train_dual_adapter_model(
     learning_rate=2e-5,
     model_save_path="best_model",
     device=None,
-    consistency_loss_weight=0.1  # Weight for the consistency loss between adapters
+    consistency_loss_weight=0.02  # Weight for the consistency loss between adapters
 ):
     """
     Train a dual-adapter model with improved training strategy.
@@ -329,7 +329,7 @@ def train_dual_adapter_model(
     # Training loop
     early_stop_counter = 0
     global_step = 0
-    
+    best_loss = 0
     for epoch in range(epochs):
         print(f"\n===== Epoch {epoch + 1}/{epochs} =====")
         
