@@ -215,7 +215,7 @@ def train_model(
                     if load_best_model_at_the_end:
                         checkpoint = torch.load(model_save_path, map_location=model.device)
                         model.load_state_dict(checkpoint)
-                    break
+                    return model
                 model.train()
                 
     if load_best_model_at_the_end:

@@ -94,7 +94,7 @@ def main():
     parser.add_argument('--load_best_model_at_the_end', type=bool, default=True)
     parser.add_argument('--min_improvement', type=int, default=0.01)
     parser.add_argument('--max_no_improve_rounds', type=int, default=1)
-    parser.add_argument('--max_step', type=int, default=2000)
+    parser.add_argument('--max_step', type=int, default=None)
 
     args = parser.parse_args()
     
