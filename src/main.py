@@ -56,7 +56,7 @@ def adaptive_training(model, dataset, args):
         if score - best_score > args.min_improvement:
             best_score = score
             no_improve_rounds = 0
-            torch.save(model.state_dict(), args.model_save_path)
+            torch.save(model.state_dict(), args.output)
 
         else:
             no_improve_rounds += 1
