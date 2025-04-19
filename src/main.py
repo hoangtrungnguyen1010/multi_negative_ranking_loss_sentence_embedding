@@ -92,7 +92,6 @@ def main():
     parser.add_argument('--is_query', type=bool, default=False)
     parser.add_argument('--BASE_MODEL_NAME', type=str, default="keepitreal/vietnamese-sbert")
     parser.add_argument('--load_best_model_at_the_end', type=bool, default=True)
-    parser.add_argument('--load_best_model_at_the_end', type=bool, default=True)
     parser.add_argument('--min_improvement', type=int, default=0.01)
     parser.add_argument('--max_no_improve_rounds', type=int, default=1)
 
