@@ -69,7 +69,7 @@ def adaptive_training(model, dataset, args):
         # batch_size = max(8, batch_size // 2)
         # eval_steps *= 2
     if args.load_best_model_at_the_end:
-        checkpoint = torch.load(args.model_save_path, map_location=model.device)
+        checkpoint = torch.load(args.output, map_location=model.device)
         model.load_state_dict(checkpoint)
 
     return model
