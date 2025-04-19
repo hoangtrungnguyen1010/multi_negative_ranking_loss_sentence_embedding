@@ -37,7 +37,8 @@ def adaptive_training(model, dataset, args):
             patience=args.patience,
             accumulation_steps=args.accumulation_steps,
             top_k=top_k,
-            is_query = args.is_query
+            is_query = args.is_query,
+            max_step = args.max_step
         )
 
         score = evaluate_model(
@@ -93,6 +94,7 @@ def main():
     parser.add_argument('--load_best_model_at_the_end', type=bool, default=True)
     parser.add_argument('--min_improvement', type=int, default=0.01)
     parser.add_argument('--max_no_improve_rounds', type=int, default=1)
+    parser.add_argument('--max_step', type=int, default=2000)
 
     args = parser.parse_args()
     
