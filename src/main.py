@@ -5,9 +5,9 @@ import torch
 from config import Config
 from data.loader import load_viir_dataset, prepare_for_training_with_hard_negatives
 from model import MultipleAdapterSentenceTransformer
-from train import train_dual_adapter_model, evaluate_model
+from train import train_model, evaluate_model
 
-def adaptive_training(model, dataset, args, max_top_k=5, min_improvement=0.01, max_no_improve_rounds=2):
+def adaptive_training(model, dataset, args):
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     top_k = args.top_k
@@ -18,14 +18,14 @@ def adaptive_training(model, dataset, args, max_top_k=5, min_improvement=0.01, m
     best_score = -float('inf')
     no_improve_rounds = 0
 
-    while top_k <= max_top_k:
+    while top_k <= args.max_top_k:
         # epochs = max(1, math.ceil(initial_epochs / (top_k + 1)))
         print(f"\n🔁 Training with top_k={top_k}, epochs={initial_epochs}, batch_size={batch_size}")
         print(args.is_query)
         dataset['train'] = prepare_for_training_with_hard_negatives(dataset['train'], model, top_k=top_k)
         dataset['validation'] = prepare_for_training_with_hard_negatives(dataset['validation'], model, top_k=top_k)
 
-        model = train_dual_adapter_model(
+        model = train_model(
             model=model,
             train_data=dataset['train'],
             val_data=dataset['validation'],
@@ -33,10 +33,12 @@ def adaptive_training(model, dataset, args, max_top_k=5, min_improvement=0.01, m
             batch_size=batch_size,
             learning_rate=args.lr,
             eval_steps=eval_steps,
-            model_save_path=args.output,
+            model_save_path='temp',
             patience=args.patience,
             accumulation_steps=args.accumulation_steps,
             top_k=top_k,
+            is_query = args.is_query,
+            max_step = None
         )
 
         score = evaluate_model(
@@ -51,19 +53,24 @@ def adaptive_training(model, dataset, args, max_top_k=5, min_improvement=0.01, m
 
         print(f"✅ Score at top_k={top_k}: {score:.4f}")
 
-        if score - best_score > min_improvement:
+        if score - best_score > args.min_improvement:
             best_score = score
             no_improve_rounds = 0
+            torch.save(model.state_dict(), args.model_save_path)
+
         else:
             no_improve_rounds += 1
-            if no_improve_rounds >= max_no_improve_rounds:
-                print(f"🛑 Stopping early at top_k={top_k}, no improvement after {max_no_improve_rounds} rounds.")
+            if no_improve_rounds >= args.max_no_improve_rounds:
+                print(f"🛑 Stopping early at top_k={top_k}, no improvement after {args.max_no_improve_rounds} rounds.")
                 break
         batch_size = int(batch_size * (top_k + 2) // (3+ top_k))
 
         top_k += 1
         # batch_size = max(8, batch_size // 2)
         # eval_steps *= 2
+    if args.load_best_model_at_the_end:
+        checkpoint = torch.load(args.model_save_path, map_location=model.device)
+        model.load_state_dict(checkpoint)
 
     return model
 
@@ -84,6 +91,10 @@ def main():
     parser.add_argument('--max_top_k', type=int, default=0)
     parser.add_argument('--is_query', type=bool, default=False)
     parser.add_argument('--BASE_MODEL_NAME', type=str, default="keepitreal/vietnamese-sbert")
+    parser.add_argument('--load_best_model_at_the_end', type=bool, default=True)
+    parser.add_argument('--load_best_model_at_the_end', type=bool, default=True)
+    parser.add_argument('--min_improvement', type=int, default=0.01)
+    parser.add_argument('--max_no_improve_rounds', type=int, default=1)
 
     args = parser.parse_args()
     

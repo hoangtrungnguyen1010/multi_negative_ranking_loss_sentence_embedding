@@ -329,7 +329,7 @@ def train_dual_adapter_model(
     # Training loop
     early_stop_counter = 0
     global_step = 0
-    best_loss = 0
+    best_loss = float("inf")
     for epoch in range(epochs):
         print(f"\n===== Epoch {epoch + 1}/{epochs} =====")
         
