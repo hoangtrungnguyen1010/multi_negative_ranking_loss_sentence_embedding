@@ -5,7 +5,7 @@ import torch
 from config import Config
 from data.loader import load_viir_dataset, prepare_for_training_with_hard_negatives
 from model import MultipleAdapterSentenceTransformer
-from train import train_model, evaluate_model
+from train import train_dual_adapter_model, evaluate_model
 
 def adaptive_training(model, dataset, args):
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -25,7 +25,7 @@ def adaptive_training(model, dataset, args):
         dataset['train'] = prepare_for_training_with_hard_negatives(dataset['train'], model, top_k=top_k)
         dataset['validation'] = prepare_for_training_with_hard_negatives(dataset['validation'], model, top_k=top_k)
 
-        model = train_model(
+        model = train_dual_adapter_model(
             model=model,
             train_data=dataset['train'],
             val_data=dataset['validation'],
@@ -38,7 +38,6 @@ def adaptive_training(model, dataset, args):
             accumulation_steps=args.accumulation_steps,
             top_k=top_k,
             is_query = args.is_query,
-            max_step = None
         )
 
         score = evaluate_model(
