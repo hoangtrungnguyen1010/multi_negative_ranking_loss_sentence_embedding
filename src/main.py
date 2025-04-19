@@ -115,7 +115,7 @@ def main():
     dataset = load_viir_dataset(args.dataset)
 
     if args.mode in ['train', 'both']:
-        model = adaptive_training(model, dataset, args, max_top_k=args.max_top_k)
+        model = adaptive_training(model, dataset, args)
 
     if args.mode in ['eval', 'both']:
         questions = [item["query"] for item in dataset["test"]]
