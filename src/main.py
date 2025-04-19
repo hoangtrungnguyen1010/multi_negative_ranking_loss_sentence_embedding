@@ -37,7 +37,6 @@ def adaptive_training(model, dataset, args):
             patience=args.patience,
             accumulation_steps=args.accumulation_steps,
             top_k=top_k,
-            is_query = args.is_query,
         )
 
         score = evaluate_model(
