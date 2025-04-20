@@ -1,8 +1,38 @@
 from datasets import load_dataset, Dataset
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
+import re
 
-def load_viir_dataset(model_name):
+def extract_content_from_tags(html_string):
+    """
+    Extracts content inside HTML tags from a given HTML string.
+
+    Args:
+    - html_string (str): The HTML string to extract content from.
+
+    Returns:
+    - list: A list of strings, where each string is the content inside an HTML tag.
+    """
+    # Regular expression to match content inside tags
+    pattern = r'<([^>]+)>(.*?)</\1>'
+
+    # Find all matches
+    matches = re.findall(pattern, html_string)
+
+    # Extract and return the content inside the tags
+    return ' '.join([match[1] for match in matches])
+
+def filter_long_samples(example, tokenizer):
+    """Remove rows where any text field exceeds max token length."""
+    max_length = tokenizer.model_max_length
+
+    query_tokens = tokenizer(example["query"], truncation=False, add_special_tokens=True)["input_ids"]
+    pos_tokens = tokenizer(example["positive"], truncation=False, add_special_tokens=True)["input_ids"]
+
+    # Keep only samples where all texts are within limit
+    return len(query_tokens) <= max_length and len(pos_tokens) <= max_length
+
+def load_viir_dataset(model_name, tokenizer):
     """
     Loads the VIIR dataset from Hugging Face.
     This function returns the dataset as a dictionary.
@@ -15,17 +45,35 @@ def load_viir_dataset(model_name):
     if 'context' in dataset['train'].column_names:
         dataset = dataset.rename_columns({'context': 'positive'})
 
+
+    if model_name == 'habedi/stack-exchange-dataset':
+        dataset = dataset['train'].map(lambda example: {
+            'positive': extract_content_from_tags(example['body'])
+        })
+        dataset = dataset.rename_columns({'title': 'query'})
+        dataset = dataset.filter(lambda example: filter_long_samples(example, tokenizer))
+        
+        split_data = dataset.train_test_split(test_size=0.8, seed=42)  # Random split
+        train_data = split_data['train']
+        test_data = split_data['test']
+        test_data = test_data.train_test_split(test_size=0.5, seed=42)
+        val_data = test_data['val']
+        test_data = test_data['test']
+
     # Accessing the different splits (train, validation, test)
-    if model_name == 'squad':
+    elif model_name == 'squad':
+        dataset['train'] = dataset.filter(lambda example: filter_long_samples(example, tokenizer))
+        dataset['validation'] = dataset.filter(lambda example: filter_long_samples(example, tokenizer))
+
         val_data = dataset['validation']
         test_data = val_data.train_test_split(test_size=0.5, seed=42)  # Random split
         val_data = test_data['train']
         test_data = test_data['test']
+        train_data = dataset['train']
     else:
         val_data = dataset['validation']
         test_data = dataset['test']
-
-    train_data = dataset['train']
+        train_data = dataset['train']
 
     return {'train': train_data, 'validation': val_data, 'test': test_data}
 

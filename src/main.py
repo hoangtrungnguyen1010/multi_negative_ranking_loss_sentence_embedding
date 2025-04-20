@@ -6,6 +6,7 @@ from config import Config
 from data.loader import load_viir_dataset, prepare_for_training_with_hard_negatives
 from model import MultipleAdapterSentenceTransformer
 from train import train_model, evaluate_model
+from transformers import AutoTokenizer
 
 def adaptive_training(model, dataset, args):
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -108,12 +109,13 @@ def main():
     model = MultipleAdapterSentenceTransformer(
         model_name_or_path=args.BASE_MODEL_NAME,
     ).to(DEVICE)
+    tokenizer = AutoTokenizer.from_pretrained(args.BASE_MODEL_NAME)
 
     if args.load_model:
         checkpoint = torch.load(args.load_model, map_location=model.device)
         model.load_state_dict(checkpoint)
 
-    dataset = load_viir_dataset(args.dataset)
+    dataset = load_viir_dataset(args.dataset, tokenizer)
 
     if args.mode in ['train', 'both']:
         model = adaptive_training(model, dataset, args)
