@@ -53,7 +53,7 @@ def load_viir_dataset(model_name, tokenizer):
         dataset = dataset.rename_columns({'title': 'query'})
         dataset = dataset.filter(lambda example: filter_long_samples(example, tokenizer))
         
-        split_data = dataset.train_test_split(test_size=0.8, seed=42)  # Random split
+        split_data = dataset.train_test_split(test_size=0.2, seed=42)  # Random split
         train_data = split_data['train']
         test_data = split_data['test']
         test_data = test_data.train_test_split(test_size=0.5, seed=42)
