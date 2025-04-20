@@ -57,7 +57,7 @@ def load_viir_dataset(model_name, tokenizer):
         train_data = split_data['train']
         test_data = split_data['test']
         test_data = test_data.train_test_split(test_size=0.5, seed=42)
-        val_data = test_data['val']
+        val_data = test_data['train']
         test_data = test_data['test']
 
     # Accessing the different splits (train, validation, test)
