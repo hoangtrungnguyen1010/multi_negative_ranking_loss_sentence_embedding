@@ -23,8 +23,8 @@ def adaptive_training(model, dataset, args):
         # epochs = max(1, math.ceil(initial_epochs / (top_k + 1)))
         print(f"\n🔁 Training with top_k={top_k}, epochs={initial_epochs}, batch_size={batch_size}")
         print(args.is_query)
-        dataset['train'] = prepare_for_training_with_hard_negatives(dataset['train'], model, top_k=top_k)
-        dataset['validation'] = prepare_for_training_with_hard_negatives(dataset['validation'], model, top_k=top_k)
+        dataset['train'] = prepare_for_training_with_hard_negatives(dataset['train'], model, top_k=top_k, batch_size=args.eval_batchsize)
+        dataset['validation'] = prepare_for_training_with_hard_negatives(dataset['validation'], model, top_k=top_k, batch_size=args.eval_batchsize)
 
         model = train_model(
             model=model,
@@ -96,6 +96,7 @@ def main():
     parser.add_argument('--min_improvement', type=int, default=0.01)
     parser.add_argument('--max_no_improve_rounds', type=int, default=1)
     parser.add_argument('--max_step', type=int, default=None)
+    parser.add_argument('--eval_batchsize', type=int, default=32)
 
     args = parser.parse_args()
     
@@ -129,7 +130,7 @@ def main():
         list_of_docs = {'context': contexts}
 
 
-        evaluate_model(questions, ground_truth_contexts, list_of_docs, model, is_query=args.is_query, batch_size = 128)
+        evaluate_model(questions, ground_truth_contexts, list_of_docs, model, is_query=args.is_query, batch_size = args.eval_batchsize)
 
 if __name__ == "__main__":
     main()
