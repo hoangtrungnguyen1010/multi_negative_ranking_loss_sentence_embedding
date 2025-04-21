@@ -86,7 +86,7 @@ def main():
     parser.add_argument('--dataset', type=str, default='AudreyTrungNguyen/Vi_IR')
     parser.add_argument('--patience', type=int, default=0)
     parser.add_argument('--accumulation_steps', type=int, default=1)
-    parser.add_argument('--eval_steps', type=int, default=908)
+    parser.add_argument('--eval_steps', type=int, default=None)
     parser.add_argument('--load_model', type=str, default=None)
     parser.add_argument('--top_k', type=int, default=0)
     parser.add_argument('--max_top_k', type=int, default=0)

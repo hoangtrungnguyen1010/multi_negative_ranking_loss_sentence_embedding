@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 import re
 import faiss
-
+from tqdm import tqdm
 def extract_content_from_tags(html_string):
     """
     Extracts content inside HTML tags from a given HTML string.
@@ -103,7 +103,7 @@ def get_hard_negatives(question_embeddings, ground_contexts, contexts, context_e
     scores, indices = index.search(question_embeddings, num_negatives + 10)
     
     hard_negatives = []
-    for i in range(len(question_embeddings)):
+    for i in tqdm(range(len(question_embeddings))):
         # Filter out the positive/ground truth context
         selected_idx = [idx for idx in indices[i] if contexts[idx] != ground_contexts[i]][:num_negatives]
         hard_negatives.append([contexts[idx] for idx in selected_idx])
