@@ -144,7 +144,7 @@ def process_dataset(original_dataset):
     return processed_dataset
 
 
-def prepare_for_training_with_hard_negatives(dataset, model, top_k = 5, batch_size= 128, is_exploded = None):
+def prepare_for_training_with_hard_negatives(dataset, model, top_k = 5, batch_size= 32, is_exploded = None):
     if top_k <1:
         return dataset
     """prepare dataset for training, create hard sample if it's needed
