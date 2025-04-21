@@ -2,6 +2,7 @@ from datasets import load_dataset, Dataset
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 import re
+import torch
 
 def extract_content_from_tags(html_string):
     """
@@ -83,20 +84,32 @@ def load_viir_dataset(model_name, tokenizer):
 
     return {'train': train_data, 'validation': val_data, 'test': test_data}
 
-def get_hard_negatives(question_embeddings,ground_contexts, contexts, context_embeddings, num_negatives=5):
-    """Retrieve hard negatives using cosine similarity (optimized batch processing)"""
+def get_hard_negatives_batched(question_embeddings, ground_contexts, contexts, context_embeddings, num_negatives=5, batch_size=100):
+    """Batched version to prevent RAM overload"""
+    all_hard_negatives = []
     
-    # Compute pairwise cosine similarity
-    similarity_matrix = cosine_similarity(question_embeddings, context_embeddings)
-    # Sort to find most similar contexts (excluding correct context)
-    sorted_indices = np.argsort(-similarity_matrix, axis=1)
-
-    hard_negatives = []
-    for i in range(len(question_embeddings)):
-        selected_idx = [idx for idx in sorted_indices[i] if contexts[idx] != ground_contexts[i]][:num_negatives]
-        hard_negatives.append([contexts[idx] for idx in selected_idx])  # Exclude self
+    for i in range(0, len(question_embeddings), batch_size):
+        batch_end = min(i + batch_size, len(question_embeddings))
+        batch_questions = question_embeddings[i:batch_end]
+        batch_ground_contexts = ground_contexts[i:batch_end]
         
-    return hard_negatives
+        # Compute similarity only for this batch
+        similarity_matrix = cosine_similarity(batch_questions, context_embeddings)
+        
+        batch_hard_negatives = []
+        for j in range(len(batch_questions)):
+            sorted_indices = np.argsort(-similarity_matrix[j])
+            selected_idx = [idx for idx in sorted_indices if contexts[idx] != batch_ground_contexts[j]][:num_negatives]
+            batch_hard_negatives.append([contexts[idx] for idx in selected_idx])
+        
+        all_hard_negatives.extend(batch_hard_negatives)
+        
+        # Free memory explicitly
+        del similarity_matrix
+        if hasattr(torch, 'cuda') and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    
+    return all_hard_negatives
 
 def explode_negatives(data):
     """
@@ -171,7 +184,7 @@ def prepare_for_training_with_hard_negatives(dataset, model, top_k = 5, batch_si
         # Encode contexts in Batches
         context_embeddings_train = model.encode(unique_contexts_train, batch_size=batch_size, convert_to_numpy=True, normalize_embeddings=True)
 
-        hard_negatives_train = get_hard_negatives(question_embeddings_train, contexts_train, unique_contexts_train, context_embeddings_train, num_negatives=top_k)
+        hard_negatives_train = get_hard_negatives_batched(question_embeddings_train, contexts_train, unique_contexts_train, context_embeddings_train, num_negatives=top_k)
         train_data_dict = {
             "query": questions_train,
             "positive": contexts_train,
