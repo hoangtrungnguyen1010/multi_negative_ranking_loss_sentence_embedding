@@ -51,6 +51,12 @@ def load_viir_dataset(model_name, tokenizer):
             'positive': extract_content_from_tags(example['body'])
         })
         dataset = dataset.rename_columns({'title': 'query'})
+        columns_to_keep = {'query', 'positive'}
+        columns_to_remove = set(dataset.column_names) - columns_to_keep
+
+# Remove all columns
+        dataset = dataset.remove_columns(columns_to_remove)
+
         dataset = dataset.filter(lambda example: filter_long_samples(example, tokenizer))
         
         split_data = dataset.train_test_split(test_size=0.2, seed=42)  # Random split
