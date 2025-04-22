@@ -60,7 +60,6 @@ def adaptive_training(model, dataset, args):
             torch.save(model.state_dict(), args.output)
             batch_size = int(batch_size * (top_k + 2) // (2+ top_k + args.step))
             top_k += args.step
-            epoch += 1
 
         else:
             no_improve_rounds += 1
@@ -69,7 +68,9 @@ def adaptive_training(model, dataset, args):
                 break
             batch_size = int(batch_size * (top_k + 2) // (2 + top_k - args.step))
             top_k -= args.step
-
+            checkpoint = torch.load(args.output, map_location=model.device)
+            model.load_state_dict(checkpoint)
+            initial_epochs += 1
         # batch_size = max(8, batch_size // 2)
         # eval_steps *= 2
     if args.load_best_model_at_the_end:
