@@ -58,15 +58,17 @@ def adaptive_training(model, dataset, args):
             best_score = score
             no_improve_rounds = 0
             torch.save(model.state_dict(), args.output)
+            top_k += args.step
+            batch_size = int(batch_size * (top_k + 2) // (2+ top_k + args.step))
 
         else:
             no_improve_rounds += 1
             if no_improve_rounds >= args.max_no_improve_rounds:
                 print(f"🛑 Stopping early at top_k={top_k}, no improvement after {args.max_no_improve_rounds} rounds.")
                 break
-        batch_size = int(batch_size * (top_k + 2) // (3+ top_k))
+            top_k -= args.step
+            batch_size = int(batch_size * (top_k + 2) // (2 + top_k - args.step))
 
-        top_k += 1
         # batch_size = max(8, batch_size // 2)
         # eval_steps *= 2
     if args.load_best_model_at_the_end:
@@ -90,11 +92,13 @@ def main():
     parser.add_argument('--load_model', type=str, default=None)
     parser.add_argument('--top_k', type=int, default=0)
     parser.add_argument('--max_top_k', type=int, default=0)
+    parser.add_argument('--step', type=int, default=1)
+
     parser.add_argument('--is_query', type=bool, default=False)
     parser.add_argument('--BASE_MODEL_NAME', type=str, default="keepitreal/vietnamese-sbert")
     parser.add_argument('--load_best_model_at_the_end', type=bool, default=True)
     parser.add_argument('--min_improvement', type=float, default=0.005)
-    parser.add_argument('--max_no_improve_rounds', type=int, default=1)
+    parser.add_argument('--max_no_improve_rounds', type=int, default=2)
     parser.add_argument('--max_step', type=int, default=None)
     parser.add_argument('--eval_batchsize', type=int, default=32)
 
