@@ -23,13 +23,13 @@ def adaptive_training(model, dataset, args):
         # epochs = max(1, math.ceil(initial_epochs / (top_k + 1)))
         print(f"\n🔁 Training with top_k={top_k}, epochs={initial_epochs}, batch_size={batch_size}")
         print(args.is_query)
-        dataset['train'] = prepare_for_training_with_hard_negatives(dataset['train'], model, top_k=top_k, batch_size=args.eval_batchsize)
-        dataset['validation'] = prepare_for_training_with_hard_negatives(dataset['validation'], model, top_k=top_k, batch_size=args.eval_batchsize)
+        train_dataset = prepare_for_training_with_hard_negatives(dataset['train'], model, top_k=top_k, batch_size=args.eval_batchsize)
+        val_dataset = prepare_for_training_with_hard_negatives(dataset['validation'], model, top_k=top_k, batch_size=args.eval_batchsize)
 
         model = train_model(
             model=model,
-            train_data=dataset['train'],
-            val_data=dataset['validation'],
+            train_data=train_dataset,
+            val_data=val_dataset,
             epochs=initial_epochs,
             batch_size=batch_size,
             learning_rate=args.lr,
@@ -60,8 +60,10 @@ def adaptive_training(model, dataset, args):
             torch.save(model.state_dict(), args.output)
             top_k += args.step
             batch_size = int(batch_size * (top_k + 2) // (2+ top_k + args.step))
+            epoch += 1
 
         else:
+            if top_k == 0
             no_improve_rounds += 1
             if no_improve_rounds >= args.max_no_improve_rounds:
                 print(f"🛑 Stopping early at top_k={top_k}, no improvement after {args.max_no_improve_rounds} rounds.")
@@ -80,7 +82,7 @@ def adaptive_training(model, dataset, args):
 def main():
     parser = argparse.ArgumentParser(description="Fine-tune and evaluate multi-adapter retrieval model")
     parser.add_argument('--mode', choices=['train', 'eval', 'both'], default='both', help="train or eval mode")
-    parser.add_argument('--epochs', type=int, default=15)
+    parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--lr', type=float, default=Config.LR)
     parser.add_argument('--output', type=str, default='vi_neg0')
@@ -132,8 +134,6 @@ def main():
         contexts = list(set(ground_truth_contexts))
 
         list_of_docs = {'context': contexts}
-
-
         evaluate_model(questions, ground_truth_contexts, list_of_docs, model, is_query=args.is_query, batch_size = args.eval_batchsize)
 
 if __name__ == "__main__":
