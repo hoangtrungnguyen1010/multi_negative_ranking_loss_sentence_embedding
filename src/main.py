@@ -58,18 +58,17 @@ def adaptive_training(model, dataset, args):
             best_score = score
             no_improve_rounds = 0
             torch.save(model.state_dict(), args.output)
-            top_k += args.step
             batch_size = int(batch_size * (top_k + 2) // (2+ top_k + args.step))
+            top_k += args.step
             epoch += 1
 
         else:
-            if top_k == 0
             no_improve_rounds += 1
             if no_improve_rounds >= args.max_no_improve_rounds:
                 print(f"🛑 Stopping early at top_k={top_k}, no improvement after {args.max_no_improve_rounds} rounds.")
                 break
-            top_k -= args.step
             batch_size = int(batch_size * (top_k + 2) // (2 + top_k - args.step))
+            top_k -= args.step
 
         # batch_size = max(8, batch_size // 2)
         # eval_steps *= 2
