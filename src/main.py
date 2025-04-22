@@ -43,10 +43,10 @@ def adaptive_training(model, dataset, args):
         )
 
         score = evaluate_model(
-            [item["query"] for item in dataset["validation"]],
-            [item["positive"] for item in dataset["validation"]],
+            [item["query"] for item in val_dataset],
+            [item["positive"] for item in val_dataset],
             {
-                'context': [item["positive"] for item in dataset["validation"]],
+                'context': [item["positive"] for item in val_dataset],
             },
             model,
             is_query = args.is_query
