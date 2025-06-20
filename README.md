@@ -1,6 +1,8 @@
-# Multi-Adapter Sentence Transformer Model for Retrieval-based QA
+# Sentence Transformer Model for Retrieval-based QA
 
-This project fine-tunes a SentenceTransformer model with multiple adapters for a retrieval-based QA system. The system uses a multi-adapter architecture, which allows the model to specialize in different domains for more efficient query-context retrieval.
+This project fine-tunes a [SentenceTransformer](https://www.sbert.net/) model for retrieval-based question answering (QA). The system is designed for efficient query-context retrieval using a standard sentence embedding model.
+
+---
 
 ## Installation
 
@@ -10,86 +12,82 @@ Ensure you have Python 3.7+ and install dependencies with:
 pip install -r requirements.txt
 ```
 
-
+---
 
 ## Quick Start
 
-```python
-from model.adapters import MultiAdapterSentenceTransformer
-from data.loader import QADataset
+You can use the provided training and evaluation scripts, or use the model directly in your own code.
 
-# Load the model
-model = MultiAdapterSentenceTransformer(
-    base_model="bert-base-uncased", 
-    adapter_names=["medical", "legal", "technical"]
-)
-
-# Load a dataset
-dataset = QADataset("path/to/dataset", domains=["medical", "legal", "technical"])
-
-# Get embeddings for a query
-query = "What are the symptoms of hypertension?"
-embeddings = model.encode(query, adapter_name="medical")
-```
+---
 
 ## Training
 
 To train the model, run:
 
 ```bash
-python main.py --mode train --epochs 20 --batch_size 32 --lr 1e-7
+python src/main.py --mode train --epochs 20 --batch_size 32 --lr 1e-4 --dataset squad
 ```
+
+Or use the provided shell script (runs in background and logs output):
+
+```bash
+bash run.sh
+```
+
+---
 
 ## Evaluation
 
 To evaluate the model, run:
 
 ```bash
-python main.py --mode eval
+python src/main.py --mode eval --dataset squad
 ```
 
-## Model Architecture
+---
 
-The `MultiAdapterSentenceTransformer` class leverages adapter-based fine-tuning to create domain-specific embeddings:
+## Command Line Arguments
 
+The main training/evaluation script (`src/main.py`) supports the following arguments:
+
+- `--mode`: `train`, `eval`, or `both` (default: `both`)
+- `--epochs`: Number of training epochs (default: 1)
+- `--batch_size`: Training batch size (default: 32)
+- `--lr`: Learning rate (default: from config)
+- `--output`: Output file for saving model checkpoints
+- `--dataset`: Dataset name (default: `AudreyTrungNguyen/Vi_IR`)
+- `--patience`: Early stopping patience
+- `--accumulation_steps`: Gradient accumulation steps
+- `--eval_steps`: Steps between evaluations
+- `--top_k`: Number of hard negatives for training
+- ...and more (see `src/main.py` for all options)
+
+---
 
 ## Directory Structure
 
 ```
-viir_retrieval/
+MixSentenceEmbedder/
 │
-├── config.py           # All configuration values
-├── main.py             # CLI entry point
-├── train.py            # Training logic
-├── evaluate.py         # Evaluation metrics and logic
-├── data/
-│   ├── loader.py       # Dataset loading, preprocessing
-│   └── dataloader.py   # Custom data loaders
+├── src/
+│   ├── config.py           # Configuration values
+│   ├── main.py             # CLI entry point
+│   ├── train.py            # Training and evaluation logic
+│   ├── model.py            # SentenceTransformer loader
+│   ├── data/
+│   │   ├── loader.py       # Dataset loading, preprocessing
+│   │   └── dataloader.py   # Custom data loaders
+│   └── utils/
+│       └── metrics.py      # Evaluation metrics
 │
-├── model/
-│   ├── adapters.py     # Adapter model definition
-│   └── loss.py         # Custom loss functions
+├── scripts/
+│   ├── train.py            # (Optional) Additional training script
+│   └── evaluate.py         # (Optional) Additional evaluation script
 │
-├── utils/
-│   ├── metrics.py      # Evaluation metrics
-│   └── memory.py       # GPU memory cleanup
-│
+├── requirements.txt
+├── run.sh
 └── README.md
 ```
 
-## Citation
+---
 
-If you use this code in your research, please cite:
-
-```
-@software{multi_adapter_sentence_transformer,
-  author = {Your Name},
-  title = {Multi-Adapter Sentence Transformer Model for Retrieval-based QA},
-  year = {2025},
-  url = {https://github.com/yourusername/viir_retrieval},
-}
-```
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.

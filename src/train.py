@@ -158,13 +158,13 @@ def train_model(
         for batch_idx, (queries, positives, negatives) in enumerate(tqdm(train_dataloader, desc="🔄 Training", leave=True)):
             step += 1  # Count each batch as a step
             # Compute embeddings
-            anchor_embeddings = model.forward(queries, is_query = is_query, batch_size=batch_size)
-            positive_embeddings = model.forward(positives, batch_size=batch_size)
+            anchor_embeddings = model.encode(queries, batch_size=batch_size)
+            positive_embeddings = model.encode(positives, batch_size=batch_size)
 
             if not negatives:
                 loss = multiple_negatives_ranking_loss(anchor_embeddings, positive_embeddings)
             else:
-                negatives_embeddings = model.forward(negatives, batch_size=batch_size).view(len(queries), top_k, -1)
+                negatives_embeddings = model.encode(negatives, batch_size=batch_size).view(len(queries), top_k, -1)
                 loss = multiple_negatives_ranking_loss(anchor_embeddings, positive_embeddings, negatives_embeddings)
 
             training_loss += loss.item()
@@ -186,7 +186,7 @@ def train_model(
                 with torch.no_grad():
                     print("Validating...")
                     for queries, positives, negatives in tqdm(val_dataloader, desc="🔄 Validation", leave=True):
-                        anchor_embeddings = model.encode(queries, is_query = is_query, batch_size=val_batch_size, convert_to_tensor=True, show_progress_bar = False)
+                        anchor_embeddings = model.encode(queries, batch_size=val_batch_size, convert_to_tensor=True, show_progress_bar = False)
                         positive_embeddings = model.encode(positives, batch_size=val_batch_size, show_progress_bar = False)
                         
                         if not negatives:
@@ -233,7 +233,7 @@ def evaluate_model(
     batch_size=128
 ):
     # Compute embeddings
-    question_embeddings = model.encode(list_of_queries, is_query = is_query, batch_size=batch_size, convert_to_numpy=True)
+    question_embeddings = model.encode(list_of_queries, batch_size=batch_size, convert_to_numpy=True)
     context_embeddings = model.encode(list_of_docs['context'], batch_size=batch_size, convert_to_numpy=True)
 
     # ✅ Normalize embeddings for cosine similarity search

@@ -4,7 +4,7 @@ import torch
 
 from config import Config
 from data.loader import load_viir_dataset, prepare_for_training_with_hard_negatives
-from model import MultipleAdapterSentenceTransformer
+from model import get_sentence_transformer
 from train import train_model, evaluate_model
 from transformers import AutoTokenizer
 
@@ -113,9 +113,10 @@ def main():
     DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
-    model = MultipleAdapterSentenceTransformer(
+    model = get_sentence_transformer(
         model_name_or_path=args.BASE_MODEL_NAME,
-    ).to(DEVICE)
+        device=DEVICE
+    )
     tokenizer = AutoTokenizer.from_pretrained(args.BASE_MODEL_NAME)
 
     if args.load_model:
